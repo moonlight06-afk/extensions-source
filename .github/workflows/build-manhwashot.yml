@@ -16,10 +16,26 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Arreglar formato del codigo
+        run: ./gradlew :src:es:manhwashot:spotlessApply
+
       - name: Compilar extension
-        run: ./gradlew :src:es:manhwashot:assembleDebug
+        run: ./gradlew :src:es:manhwashot:assembleDebug -x spotlessKotlinCheck
+
+      - name: Firmar APK para poder instalarlo
+        run: |
+          set -e
+          APK=$(find src/es/manhwashot/build/outputs -name "*.apk" | head -n 1)
+          echo "APK encontrado: $APK"
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n 1)
+          keytool -genkeypair -keystore ks.jks -storepass android -keypass android \
+            -alias key -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=ManhwaShot"
+          $BT/zipalign -f 4 "$APK" aligned.apk
+          mkdir -p out
+          $BT/apksigner sign --ks ks.jks --ks-pass pass:android --key-pass pass:android \
+            --out out/ManhwaShot.apk aligned.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: ManhwaShot-APK
-          path: src/es/manhwashot/build/outputs/apk/debug/*.apk
+          path: out/ManhwaShot.apk
