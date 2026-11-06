@@ -104,7 +104,7 @@ abstract class LectorXd : KeiSource() {
             ?.let { filter ->
                 Filters.adultContentValues.getOrNull(filter.state)
             }
-            ?: "safe"
+            ?: "all"
 
         builder.addQueryParameter(
             "adult",
