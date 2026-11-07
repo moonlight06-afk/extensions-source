@@ -1,11 +1,18 @@
-name: Build ManhwaShot
+name: Build extension
 
 on:
   workflow_dispatch:
+    inputs:
+      extensions:
+        description: "Carpetas dentro de src/es separadas por espacio (ej: lectorxd eternalmangas)"
+        required: true
+        default: "lectorxd eternalmangas"
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      EXTS: ${{ inputs.extensions }}
     steps:
       - uses: actions/checkout@v4
 
@@ -17,25 +24,35 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Arreglar formato del codigo
-        run: ./gradlew :src:es:manhwashot:spotlessApply
+        run: |
+          for e in $EXTS; do
+            ./gradlew ":src:es:$e:spotlessApply"
+          done
 
-      - name: Compilar extension
-        run: ./gradlew :src:es:manhwashot:assembleDebug -x spotlessKotlinCheck
+      - name: Compilar extensiones
+        run: |
+          TASKS=""
+          for e in $EXTS; do
+            TASKS="$TASKS :src:es:$e:assembleDebug"
+          done
+          ./gradlew $TASKS -x spotlessKotlinCheck
 
-      - name: Firmar APK para poder instalarlo
+      - name: Firmar APKs para poder instalarlos
         run: |
           set -e
-          APK=$(find src/es/manhwashot/build/outputs -name "*.apk" | head -n 1)
-          echo "APK encontrado: $APK"
           BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n 1)
           keytool -genkeypair -keystore ks.jks -storepass android -keypass android \
-            -alias key -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=ManhwaShot"
-          $BT/zipalign -f 4 "$APK" aligned.apk
+            -alias key -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Extension"
           mkdir -p out
-          $BT/apksigner sign --ks ks.jks --ks-pass pass:android --key-pass pass:android \
-            --out out/ManhwaShot.apk aligned.apk
+          for e in $EXTS; do
+            APK=$(find "src/es/$e/build/outputs" -name "*.apk" | head -n 1)
+            echo "APK de $e: $APK"
+            $BT/zipalign -f 4 "$APK" "aligned-$e.apk"
+            $BT/apksigner sign --ks ks.jks --ks-pass pass:android --key-pass pass:android \
+              --out "out/$e.apk" "aligned-$e.apk"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ManhwaShot-APK
-          path: out/ManhwaShot.apk
+          name: Extensiones-APK
+          path: out/*.apk
