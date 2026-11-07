@@ -21,6 +21,7 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import java.text.Normalizer
 import kotlin.time.Instant
 
 @Source
@@ -28,15 +29,27 @@ abstract class EternalMangas : KeiSource() {
 
     override val supportRelatedMangasBySearch = true
 
-    override suspend fun getPopularManga(page: Int): MangasPage {
-        val document = client.get(baseUrl, Fetch.DOCUMENT).asJsoup()
-        val mangas = document.select("a.em-popular-card").map { it.toSManga() }
-        return MangasPage(mangas, false)
-    }
+    // Antes solo leia el carrusel de la portada (sin mas paginas).
+    // Ahora recorre todo el catalogo /series.
+    override suspend fun getPopularManga(page: Int): MangasPage = fetchCatalog(page, "", FilterList())
 
-    override suspend fun getLatestUpdates(page: Int) = getSearchMangaList(page, "", FilterList())
+    override suspend fun getLatestUpdates(page: Int): MangasPage = fetchCatalog(page, "", FilterList())
 
     override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage {
+        val result = fetchCatalog(page, query, filters)
+        // La web guarda varios titulos sin tildes ("Sombras de redencion").
+        // Si no hubo resultados, se reintenta sin tildes.
+        val plain = query.withoutAccents()
+        if (result.mangas.isEmpty() && plain != query) {
+            return fetchCatalog(page, plain, filters)
+        }
+        return result
+    }
+
+    private fun String.withoutAccents(): String = Normalizer.normalize(this, Normalizer.Form.NFD)
+        .replace(Regex("\\p{Mn}+"), "")
+
+    private suspend fun fetchCatalog(page: Int, query: String, filters: FilterList): MangasPage {
         val url = "$baseUrl/series".toHttpUrl().newBuilder().apply {
             if (query.isNotBlank()) addQueryParameter("search", query.trim())
             filters.filterIsInstance<SelectFilter>().forEach { it.addTo(this) }
@@ -48,7 +61,10 @@ abstract class EternalMangas : KeiSource() {
             // Text-only novels; "Novela visual" has image chapters
             .filterNot { it.selectFirst(".em-series-type-badge")?.text() == NOVEL_TYPE }
             .map { it.toSManga() }
-        return MangasPage(mangas, document.selectFirst("a[rel=next]") != null)
+
+        val hasNextLink = document.selectFirst("a[rel=next]") != null
+        val hasAnyPager = document.selectFirst("a[rel=prev], a[href*=page=]") != null
+        return MangasPage(mangas, hasNextLink || (!hasAnyPager && mangas.isNotEmpty()))
     }
 
     private fun Element.toSManga() = SManga.create().apply {
